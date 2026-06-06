@@ -584,18 +584,41 @@ class PPO(BaseAlgo):
         self._create_eval_callbacks()
         self._pre_evaluate_policy()
         actor_state = self._create_actor_state()
-        step = 0
+
+        eval_steps = int(self.config.get("eval_steps", -1))
+        if eval_steps <= 0:
+            fallback_steps = int(self.env.config.get("auto_record_num_frames", -1))
+            if fallback_steps > 0:
+                eval_steps = fallback_steps
+                logger.info(f"eval_steps not set; fallback to auto_record_num_frames={eval_steps}")
+            else:
+                eval_steps = 600
+
         self.eval_policy = self._get_inference_policy()
         obs_dict = self.env.reset_all()
         init_actions = torch.zeros(self.env.num_envs, self.num_act, device=self.device)
         actor_state.update({"obs": obs_dict, "actions": init_actions})
         actor_state = self._pre_eval_env_step(actor_state)
-        while True:
-            actor_state["step"] = step
-            actor_state = self._pre_eval_env_step(actor_state)
-            actor_state = self.env_step(actor_state)
-            actor_state = self._post_eval_env_step(actor_state)
-            step += 1
+
+        if eval_steps > 0:
+            for step in track(range(eval_steps), description="Evaluating policy"):
+                actor_state["step"] = step
+                actor_state = self._pre_eval_env_step(actor_state)
+                actor_state = self.env_step(actor_state)
+                actor_state = self._post_eval_env_step(actor_state)
+            logger.info(f"Eval progress: {eval_steps}/{eval_steps}")
+        else:
+            logger.info("Evaluating policy without step limit; set algo.config.eval_steps to show progress.")
+            step = 0
+            while True:
+                actor_state["step"] = step
+                actor_state = self._pre_eval_env_step(actor_state)
+                actor_state = self.env_step(actor_state)
+                actor_state = self._post_eval_env_step(actor_state)
+                step += 1
+                if step % 100 == 0:
+                    logger.info(f"Eval progress: {step} steps")
+
         self._post_evaluate_policy()
 
     def _create_actor_state(self):

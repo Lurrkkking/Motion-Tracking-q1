@@ -123,8 +123,13 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
             self.extend_body_parent_ids = torch.tensor(extend_parent_ids, device=self.device, dtype=torch.long)
             self.extend_body_pos_in_parent = torch.tensor(extend_pos).repeat(self.num_envs, 1, 1).to(self.device)
             self.extend_body_rot_in_parent_wxyz = torch.tensor(extend_rot).repeat(self.num_envs, 1, 1).to(self.device)
-            self.extend_body_rot_in_parent_xyzw = self.extend_body_rot_in_parent_wxyz[:, :, [1, 2, 3, 0]]
             self.num_extend_bodies = len(extend_parent_ids)
+            if self.num_extend_bodies == 0:
+                self.extend_body_parent_ids = torch.zeros(0, device=self.device, dtype=torch.long)
+                self.extend_body_pos_in_parent = torch.zeros(self.num_envs, 0, 3, device=self.device)
+                self.extend_body_rot_in_parent_xyzw = torch.zeros(self.num_envs, 0, 4, device=self.device)
+            else:
+                self.extend_body_rot_in_parent_xyzw = self.extend_body_rot_in_parent_wxyz[:, :, [1, 2, 3, 0]]
 
             self.marker_coords = torch.zeros(self.num_envs, 
                                          self.num_bodies + self.num_extend_bodies, 
@@ -400,6 +405,17 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         Args:
             env_ids (List[int]): Environemnt ids
         """
+        # eval: default pose, only copy yaw heading from motion
+        if self.is_evaluating:
+            motion_times = (self.episode_length_buf) * self.dt + self.motion_start_times
+            motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times)
+            motion_root_rot = motion_res['root_rot'][env_ids]
+            heading_quat = calc_heading_quat(motion_root_rot, w_last=True)
+            self.simulator.robot_root_states[env_ids, :3] = self.base_init_state[:3]
+            self.simulator.robot_root_states[env_ids, 3:7] = heading_quat
+            self.simulator.robot_root_states[env_ids, 7:13] = 0.0
+            return
+
         # base position
         if self.custom_origins: # trimesh
             motion_times = (self.episode_length_buf) * self.dt + self.motion_start_times # next frames so +1
@@ -469,6 +485,11 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
         Args:
             env_ids (List[int]): Environemnt ids
         """
+
+        if self.is_evaluating:
+            self.simulator.dof_pos[env_ids] = self.default_dof_pos
+            self.simulator.dof_vel[env_ids] = 0.0
+            return
 
         motion_times = (self.episode_length_buf) * self.dt + self.motion_start_times # next frames so +1
         offset = self.env_origins

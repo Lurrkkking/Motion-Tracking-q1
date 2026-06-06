@@ -110,7 +110,7 @@ class BaseTask():
     #                                             gymtorch.unwrap_tensor(env_ids_int32), len(env_ids_int32))
     
     def render(self, sync_frame_time=True):
-        if self.viewer:
+        if self.viewer or getattr(self.simulator, "offscreen_record", False):
             self.simulator.render(sync_frame_time)
 
     ###########################################################################

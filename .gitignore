@@ -59,3 +59,6 @@ AMASS/*
 *.sh
 *.txt
 
+
+# local Q1 robot assets, not committed
+humanoidverse/data/robots/q1/
