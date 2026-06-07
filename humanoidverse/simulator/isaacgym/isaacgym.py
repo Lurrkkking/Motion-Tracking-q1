@@ -33,6 +33,16 @@ class IsaacGym(BaseSimulator):
         self.offscreen_video_path = None
         self.offscreen_recorded_frames = 0
         self.offscreen_recording_active = False
+        # --- ref motion markers ---
+        self.show_ref_motion_markers = False
+        self.ref_marker_world_pos = None
+        self.ref_marker_body_names = []
+        self.ref_marker_radius_px = 4
+        self.ref_marker_color_bgr = (0, 255, 255)
+        self.ref_marker_bodies_filter = "all"
+        self.ref_marker_draw_skeleton = False
+        self.ref_marker_project_debug = False
+        self._ref_marker_first_frame_logged = False
         if config.save_rendering_dir is not None:
             self.save_rendering_dir = Path(config.save_rendering_dir)
 
@@ -582,11 +592,97 @@ class IsaacGym(BaseSimulator):
         if img.dtype != np.uint8:
             img = img.astype(np.uint8)
         bgr = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
+        # --- ref motion marker overlay ---
+        if self.show_ref_motion_markers and self.ref_marker_world_pos is not None:
+            bgr = self._overlay_ref_motion_markers(bgr)
         self.offscreen_video_writer.write(bgr)
         self.offscreen_recorded_frames += 1
         if self.auto_record_num_frames > 0 and self.offscreen_recorded_frames >= self.auto_record_num_frames:
             self.offscreen_recording_active = False
             self.finalize_recording()
+
+    def _overlay_ref_motion_markers(self, bgr):
+        """Project ref body world positions to pixel coords and draw yellow dots."""
+        if self.ref_marker_world_pos is None or self.offscreen_camera_handle is None:
+            return bgr
+
+        points = self.ref_marker_world_pos.detach().cpu().numpy()  # [N, 3]
+        body_names = self.ref_marker_body_names if self.ref_marker_body_names else [f"body_{i}" for i in range(len(points))]
+        N = len(points)
+
+        # Filter bodies
+        mask = np.ones(N, dtype=bool)
+        if self.ref_marker_bodies_filter == "feet":
+            keep = [i for i, n in enumerate(body_names) if "ankle" in n.lower() or "foot" in n.lower()]
+            mask = np.zeros(N, dtype=bool); mask[keep] = True
+        elif self.ref_marker_bodies_filter == "lower_body":
+            keep = [i for i, n in enumerate(body_names) if any(k in n.lower() for k in ["hip", "knee", "ankle", "foot", "pelvis", "waist", "torso"])]
+            mask = np.zeros(N, dtype=bool); mask[keep] = True
+        elif isinstance(self.ref_marker_bodies_filter, (list, tuple)):
+            keep = [i for i, n in enumerate(body_names) if n in self.ref_marker_bodies_filter]
+            mask = np.zeros(N, dtype=bool); mask[keep] = True
+        points = points[mask]
+        N = points.shape[0]
+
+        if N == 0:
+            return bgr
+
+        h, w = bgr.shape[:2]
+
+        # Get view and projection matrices
+        try:
+            view_raw = self.gym.get_camera_view_matrix(self.sim, self.envs[0], self.offscreen_camera_handle)
+            proj_raw = self.gym.get_camera_proj_matrix(self.sim, self.envs[0], self.offscreen_camera_handle)
+        except Exception as e:
+            if self.ref_marker_project_debug:
+                logger.warning(f"[REF_MARKER] Failed to get camera matrices: {e}")
+            return bgr
+
+        view = np.array(view_raw, dtype=np.float32).reshape(4, 4)
+        proj = np.array(proj_raw, dtype=np.float32).reshape(4, 4)
+
+        p_world = np.concatenate([points, np.ones((N, 1))], axis=1)
+
+        # Try both matrix orientations (needed due to different IsaacGym versions)
+        best_visible = 0
+        best_coords = None
+        for use_T in [False, True]:
+            v = view.T if use_T else view
+            p = proj.T if use_T else proj
+            p_cam = p_world @ v
+            p_clip = p_cam @ p
+            w_clip = p_clip[:, 3:4]
+            w_clip_safe = np.where(np.abs(w_clip) < 1e-8, 1e-8, w_clip)
+            ndc = p_clip[:, :3] / w_clip_safe
+            u = (ndc[:, 0] + 1) * 0.5 * w
+            v_px = (1 - ndc[:, 1]) * 0.5 * h
+            in_front = p_cam[:, 2] < 0  # OpenGL: camera looks along -Z
+            visible = np.sum((u >= 0) & (u < w) & (v_px >= 0) & (v_px < h) & in_front)
+            if visible > best_visible:
+                best_visible = visible
+                best_coords = (u, v_px, in_front)
+
+        if best_coords is None:
+            return bgr
+
+        u, v_px, in_front = best_coords
+        color = self.ref_marker_color_bgr  # BGR tuple
+        radius = max(1, int(self.ref_marker_radius_px))
+        drawn = 0
+        for i in range(N):
+            if 0 <= u[i] < w and 0 <= v_px[i] < h:
+                cv2.circle(bgr, (int(u[i]), int(v_px[i])), radius, color, -1)
+                drawn += 1
+
+        if not self._ref_marker_first_frame_logged:
+            self._ref_marker_first_frame_logged = True
+            logger.info(f"[REF_MARKER] enabled=True")
+            logger.info(f"[REF_MARKER] num_markers={N}")
+            logger.info(f"[REF_MARKER] body_names={body_names[:8]}...")
+            logger.info(f"[REF_MARKER] visible_markers={drawn}/{N} at first frame")
+            logger.info(f"[REF_MARKER] save video to {self.offscreen_video_path}")
+
+        return bgr
 
     def finalize_recording(self):
         if self.offscreen_video_writer is not None:

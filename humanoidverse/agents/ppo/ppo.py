@@ -101,7 +101,8 @@ class PPO(BaseAlgo):
             obs_dim_dict=self.algo_obs_dim_dict,
             module_config_dict=self.config.module_dict.actor,
             num_actions=self.num_act,
-            init_noise_std=self.config.init_noise_std
+            init_noise_std=self.config.init_noise_std,
+            learn_sigma=self.config.learn_sigma
         ).to(self.device)
 
         self.critic = PPOCritic(self.algo_obs_dim_dict,

@@ -244,6 +244,16 @@ class LeggedRobotMotionTracking(LeggedRobotBase):
 
         ref_body_pos_extend = motion_res["rg_pos_t"]
         self.ref_body_pos_extend[:] = ref_body_pos_extend # for visualization and analysis
+        # --- ref motion marker overlay (eval only) ---
+        if self.config.get("show_ref_motion_markers", False):
+            self.simulator.show_ref_motion_markers = True
+            self.simulator.ref_marker_world_pos = ref_body_pos_extend[0].detach().clone()
+            self.simulator.ref_marker_body_names = self.config.robot.motion.body_names
+            self.simulator.ref_marker_radius_px = self.config.ref_marker_radius_px
+            self.simulator.ref_marker_color_bgr = tuple(self.config.ref_marker_color_bgr)
+            self.simulator.ref_marker_bodies_filter = self.config.ref_marker_bodies
+            self.simulator.ref_marker_draw_skeleton = self.config.ref_marker_draw_skeleton
+            self.simulator.ref_marker_project_debug = self.config.ref_marker_project_debug
         ref_body_vel_extend = motion_res["body_vel_t"] # [num_envs, num_markers, 3]
         self.ref_body_rot_extend = ref_body_rot_extend = motion_res["rg_rot_t"] # [num_envs, num_markers, 4]
         ref_body_ang_vel_extend = motion_res["body_ang_vel_t"] # [num_envs, num_markers, 3]

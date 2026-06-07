@@ -557,6 +557,15 @@ class LeggedRobotBase(BaseTask):
         Returns:
             [torch.Tensor]: Torques sent to the simulation
         """
+        # DEBUG hook: bypass action_scale for manual jump test
+        if hasattr(self, '_debug_direct_pd_target') and self._debug_direct_pd_target is not None:
+            torques = self._kp_scale * self.p_gains * (self._debug_direct_pd_target - self.simulator.dof_pos) \
+                      - self._kd_scale * self.d_gains * self.simulator.dof_vel
+            self._debug_direct_pd_target = None  # one-shot, reset after use
+            if self.config.robot.control.clip_torques:
+                return torch.clip(torques, -self.torque_limits, self.torque_limits)
+            return torques
+
         actions_scaled = actions * self.config.robot.control.action_scale
         control_type = self.config.robot.control.control_type
         if control_type=="P":

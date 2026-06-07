@@ -24,6 +24,7 @@ algo:
     load_optimizer: True
 
     init_noise_std: 0.8
+    learn_sigma: True
 
     num_learning_iterations: 1000000
     init_at_random_ep_len: True

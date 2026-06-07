@@ -127,6 +127,14 @@ def main(override_config: OmegaConf):
     OmegaConf.update(config, "env.config.offscreen_record_width", offscreen_record_width, force_add=True)
     OmegaConf.update(config, "env.config.offscreen_record_height", offscreen_record_height, force_add=True)
     OmegaConf.update(config, "env.config.offscreen_record_fps", offscreen_record_fps, force_add=True)
+    # --- ref motion markers overlay ---
+    show_ref_motion_markers = bool(config.get("show_ref_motion_markers", False))
+    OmegaConf.update(config, "env.config.show_ref_motion_markers", show_ref_motion_markers, force_add=True)
+    OmegaConf.update(config, "env.config.ref_marker_radius_px", int(config.get("ref_marker_radius_px", 4)), force_add=True)
+    OmegaConf.update(config, "env.config.ref_marker_color_bgr", config.get("ref_marker_color_bgr", [0, 255, 255]), force_add=True)
+    OmegaConf.update(config, "env.config.ref_marker_bodies", config.get("ref_marker_bodies", "all"), force_add=True)
+    OmegaConf.update(config, "env.config.ref_marker_draw_skeleton", bool(config.get("ref_marker_draw_skeleton", False)), force_add=True)
+    OmegaConf.update(config, "env.config.ref_marker_project_debug", bool(config.get("ref_marker_project_debug", False)), force_add=True)
     if auto_record:
         current_eval_steps = config.algo.config.get("eval_steps", -1)
         if current_eval_steps is None or int(current_eval_steps) < 0:

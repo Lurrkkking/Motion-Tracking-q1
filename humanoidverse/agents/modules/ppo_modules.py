@@ -12,7 +12,8 @@ class PPOActor(nn.Module):
                 obs_dim_dict,
                 module_config_dict,
                 num_actions,
-                init_noise_std):
+                init_noise_std,
+                learn_sigma=True):
         super(PPOActor, self).__init__()
 
         module_config_dict = self._process_module_config(module_config_dict, num_actions)
@@ -20,7 +21,10 @@ class PPOActor(nn.Module):
         self.actor_module = BaseModule(obs_dim_dict, module_config_dict)
 
         # Action noise
-        self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        if learn_sigma:
+            self.std = nn.Parameter(init_noise_std * torch.ones(num_actions))
+        else:
+            self.register_buffer('std', init_noise_std * torch.ones(num_actions))
         self.distribution = None
         # disable args validation for speedup
         Normal.set_default_validate_args = False

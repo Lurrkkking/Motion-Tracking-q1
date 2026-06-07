@@ -7,6 +7,11 @@ simulator:
   config:
     name: "isaacgym"
     terrain: ${terrain}
+    offscreen_record: False
+    auto_record: False
+    offscreen_record_width: 1280
+    offscreen_record_height: 720
+    offscreen_record_fps: 30
     plane:
         static_friction: 1.0
         dynamic_friction: 1.0

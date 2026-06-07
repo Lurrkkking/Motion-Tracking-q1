@@ -5,13 +5,13 @@ rewards:
   set_reward_date: 20241025
   only_positive_rewards: False
   reward_scales:
-    teleop_body_position_extend: 6.5
-    teleop_vr_3point: 2.5
-    teleop_body_position_feet: 4.0
+    teleop_body_position_extend: 3.5
+    teleop_vr_3point: 0
+    teleop_body_position_feet: 3.0
     teleop_body_rotation_extend: 0.8
     teleop_body_ang_velocity_extend: 0.8
     teleop_body_velocity_extend: 0.8
-    teleop_joint_position: 3.0
+    teleop_joint_position: 1.0
     teleop_joint_velocity: 1.2
     penalty_torques: -0.000001
     penalty_action_rate: -0.01
@@ -21,11 +21,12 @@ rewards:
     limits_dof_pos: -10.0
     limits_dof_vel: -3.0
     limits_torque: -0.3
+    feet_max_height_for_this_air: -200.0
     termination: -70.0
 
-  teleop_body_pos_lowerbody_weight: 1.2
+  teleop_body_pos_lowerbody_weight: 1.5
   teleop_body_pos_upperbody_weight: 0.8
-  desired_feet_max_height_for_this_air: 0.35
+  desired_feet_max_height_for_this_air: 0.25
 
   reward_tracking_sigma:
     teleop_upper_body_pos: 0.03
