@@ -1,0 +1,32 @@
+# Q1 CR7 Motion Tracking MuJoCo sim2sim config
+# Fallback / override values. Training config.yaml takes priority.
+# Values here are only used when the training config doesn't have them.
+
+# --- MuJoCo physics ---
+mujoco:
+  simulation_dt: 0.005       # 200 Hz MuJoCo physics (matches IsaacGym fps=200)
+  solver_iterations: 100
+  ls_iterations: 50
+  gravity: [0.0, 0.0, -9.81]
+
+# --- Safety ---
+safety:
+  max_abs_qacc: 50000.0
+  min_root_z: 0.05
+  max_root_z: 3.0
+
+# --- Video ---
+video:
+  fps: 50
+  width: 1280
+  height: 720
+
+# --- IMU body name ---
+imu_body_name: "pelvis"
+torso_body_name: "torso_link"
+
+# --- Reference marker ---
+ref_marker:
+  radius: 0.02
+  color: [1.0, 1.0, 0.0, 1.0]  # yellow RGBA
+  body_names_filter: ["torso_link", "left_ankle_roll_link", "right_ankle_roll_link"]

@@ -222,17 +222,24 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         landing = (phase >= cfg['landing_phase_start']) & (phase < cfg['landing_phase_end'])
 
         # Handle overlap: priority takeoff > flight > landing > crouch
-        # takeoff/early flight transition region
         flight = flight & ~takeoff
         landing = landing & ~takeoff & ~flight
         crouch = crouch & ~takeoff & ~flight & ~landing
+
+        # After landing: phase >= landing_phase_end
+        after_landing = phase >= cfg['landing_phase_end']
 
         return {
             'crouch': crouch,
             'takeoff': takeoff,
             'flight': flight,
             'landing': landing,
+            'after_landing': after_landing,
         }
+
+    def _get_q1_cr7_phase_masks(self):
+        """Public alias — returns is_crouch, is_takeoff, is_flight, is_landing, is_after_landing."""
+        return self._get_phase_masks()
 
     # ------------------------------------------------------------------
     #  Pre-compute observations — add Q1 CR7-specific buffers
@@ -245,6 +252,13 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         offset = self.env_origins
         motion_times = (self.episode_length_buf + 1) * self.dt + self.motion_start_times
         motion_res = self._motion_lib.get_motion_state(self.motion_ids, motion_times, offset=offset)
+
+        # Runtime sanity: motion dof count must match simulator
+        if not hasattr(self, '_q1_motion_dof_checked') or not self._q1_motion_dof_checked:
+            m_dof = motion_res['dof_pos'].shape[1]
+            assert m_dof == self.num_dofs, \
+                f"Motion dof_pos dim {m_dof} != simulator dof count {self.num_dofs}"
+            self._q1_motion_dof_checked = True
 
         # --- Root state ---
         # actual
@@ -314,139 +328,38 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         return yaw
 
     def _log_q1_debug_info(self):
-        """Log Q1-specific debug info to log_dict."""
-        self.log_dict["q1_root_z_error"] = self.q1_root_z_error.mean()
-        self.log_dict["q1_root_vz_error"] = self.q1_root_vz_error.mean()
-        self.log_dict["q1_yaw_error_deg"] = torch.rad2deg(self.q1_yaw_error_rad).abs().mean()
-        self.log_dict["q1_yaw_rate_error"] = self.q1_yaw_rate_error.mean()
-        self.log_dict["q1_ref_root_z"] = self.q1_ref_root_z.mean()
-        self.log_dict["q1_actual_root_z"] = self.q1_actual_root_z.mean()
-        self.log_dict["q1_ref_vz"] = self.q1_ref_root_vz.mean()
-        self.log_dict["q1_actual_vz"] = self.q1_actual_root_vz.mean()
-        self.log_dict["q1_ref_yaw_rate"] = self.q1_ref_yaw_rate.mean()
-        self.log_dict["q1_actual_yaw_rate"] = self.q1_actual_yaw_rate.mean()
-
-        # Flight/contact rates
-        flight_mask = self.q1_phase_masks['flight'].float()
-        flight_contact = (self.q1_any_contact & self.q1_phase_masks['flight']).float()
-        self.log_dict["q1_flight_contact_rate"] = flight_contact.mean()
-        self.log_dict["q1_both_feet_air_rate"] = self.q1_both_feet_air.float().mean()
-
-        # Phase ratios
-        self.log_dict["q1_phase_crouch_ratio"] = self.q1_phase_masks['crouch'].float().mean()
-        self.log_dict["q1_phase_takeoff_ratio"] = self.q1_phase_masks['takeoff'].float().mean()
-        self.log_dict["q1_phase_flight_ratio"] = self.q1_phase_masks['flight'].float().mean()
-        self.log_dict["q1_phase_landing_ratio"] = self.q1_phase_masks['landing'].float().mean()
-        self.log_dict["q1_episode_phase_mean"] = self._ref_motion_phase.mean()
-
-        # --- Per-phase root_z / root_vz RMSE ---
-        for phase_name, mask in [
-            ("crouch", self.q1_phase_masks['crouch']),
-            ("takeoff", self.q1_phase_masks['takeoff']),
-            ("flight", self.q1_phase_masks['flight']),
-            ("landing", self.q1_phase_masks['landing']),
-        ]:
-            weight = mask.float()
-            total = weight.sum() + 1e-8
-            # root_z RMSE within phase
-            z_rmse = torch.sqrt((weight * self.q1_root_z_error ** 2).sum() / total)
-            vz_rmse = torch.sqrt((weight * self.q1_root_vz_error ** 2).sum() / total)
-            self.log_dict[f"q1_root_z_rmse_{phase_name}"] = z_rmse
-            self.log_dict[f"q1_root_vz_rmse_{phase_name}"] = vz_rmse
-
-        # --- Peak values (max over envs) ---
-        self.log_dict["q1_actual_root_vz_max"] = self.q1_actual_root_vz.max()
-        self.log_dict["q1_ref_root_vz_max"] = self.q1_ref_root_vz.max()
-        self.log_dict["q1_actual_root_z_max"] = self.q1_actual_root_z.max()
-        self.log_dict["q1_ref_root_z_max"] = self.q1_ref_root_z.max()
-        self.log_dict["q1_both_feet_air_count"] = self.q1_both_feet_air.float().sum()
+        """Minimal Q1-specific debug log."""
+        pass
 
     # ------------------------------------------------------------------
     #  Phase-aware termination
     # ------------------------------------------------------------------
 
     def _check_termination(self):
-        """Q1 CR7 phase-aware termination.
+        """Q1 CR7 termination — config-controlled + catastrophic.
 
-        Overrides the default termination pipeline:
-        1. Always checks motion_end timeout (from super)
-        2. Disables standard gravity/height/contact termination
-        3. Applies phase-specific termination rules:
-           - crouch/takeoff/flight: only catastrophic falls terminate
-           - landing: stricter termination
-           - reference-relative height termination (if enabled)
+        Standard termination (gravity/height/contact etc.) controlled by
+        env.config.termination.* — can be overridden from CLI.
+
+        Additionally, always terminates on:
+        - root_z < 0.0 — pelvis below ground, truly broken
+        - Motion end / episode length timeout
         """
-        # Start with clean buffers
+        # Standard config-controlled termination (reads self.config.termination.*)
         self.reset_buf[:] = 0
         self.time_out_buf[:] = 0
-
-        # Timeout
+        self._update_reset_buf()  # parent: gravity, height, contact, dof_pos, etc.
         self._update_timeout_buf()
-
-        # Q1-specific graceful termination
-        cfg = self._q1_cr7_config
-        phase = self._ref_motion_phase.squeeze(-1)
-        masks = self.q1_phase_masks
-
-        # --- Build per-phase termination flags ---
-        is_aerial_phase = masks['crouch'] | masks['takeoff'] | masks['flight']
-        is_landing_phase = masks['landing']
-        is_late_phase = phase >= cfg['landing_phase_end']
-
-        if cfg.get('reference_relative_termination', True):
-            # Reference-relative height termination
-            height_margin = torch.where(
-                is_aerial_phase, cfg['crouch_height_margin'],
-                torch.where(is_landing_phase, cfg['landing_height_margin'],
-                            cfg['landing_height_margin'])
-            )
-            terminate_low_height = self.q1_actual_root_z < (self.q1_ref_root_z - height_margin)
-        else:
-            # Fixed height termination
-            min_height = torch.where(
-                is_aerial_phase,
-                torch.tensor(cfg['catastrophic_root_z'], device=self.device),
-                torch.where(is_landing_phase,
-                            torch.tensor(0.12, device=self.device),
-                            torch.tensor(0.12, device=self.device))
-            )
-            terminate_low_height = self.q1_actual_root_z < min_height
-
-        # Catastrophic: robot fully collapsed
-        terminate_catastrophic = self.q1_actual_root_z < cfg['catastrophic_root_z']
-
-        # Gravity-based termination (relaxed for aerial phases)
-        grav_x = self.projected_gravity[:, 0]
-        grav_y = self.projected_gravity[:, 1]
-
-        if is_aerial_phase.any():
-            # Aerial: only terminate if nearly horizontal
-            grav_term_aerial = (torch.abs(grav_x) > 0.98) | (torch.abs(grav_y) > 0.98)
-        else:
-            grav_term_aerial = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-        # Landing/late: stricter
-        grav_term_landing = (torch.abs(grav_x) > 0.9) | (torch.abs(grav_y) > 0.9)
-        is_not_aerial = ~is_aerial_phase
-        terminate_gravity = (is_aerial_phase & grav_term_aerial) | (is_not_aerial & grav_term_landing)
-
-        # Contact termination: only if non-foot bodies hit ground hard
-        # Use key bodies (pelvis, shoulders, hips) for contact check
-        terminate_contact = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
-
-        # --- Compose reset buffer ---
-        self.reset_buf |= terminate_catastrophic
-        self.reset_buf |= terminate_low_height
-        self.reset_buf |= terminate_gravity
-        self.reset_buf |= terminate_contact
-
-        # Always include timeout
         self.reset_buf |= self.time_out_buf
 
-        # --- Log termination flags ---
-        self.log_dict["q1_terminate_low_height"] = terminate_low_height.float().mean()
-        self.log_dict["q1_terminate_gravity"] = terminate_gravity.float().mean()
-        self.log_dict["q1_terminate_contact"] = terminate_contact.float().mean()
+        # Extra catastrophic guard: pelvis below ground always resets
+        terminate_catastrophic = self.q1_actual_root_z < 0.0
+        self.reset_buf |= terminate_catastrophic
+
+        # Log
+        self.log_dict["q1_terminate_low_height"] = (self.reset_buf & ~terminate_catastrophic & ~self.time_out_buf).float().mean()
+        self.log_dict["q1_terminate_gravity"] = torch.zeros(1, device=self.device)
+        self.log_dict["q1_terminate_contact"] = torch.zeros(1, device=self.device)
         self.log_dict["q1_terminate_catastrophic"] = terminate_catastrophic.float().mean()
         self.log_dict["q1_terminate_motion_end"] = (self.time_out_buf & ~self.reset_buf).float().mean()
 
@@ -500,94 +413,124 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         ], dim=-1)
 
     # ------------------------------------------------------------------
-    #  Q1 CR7 Reward functions
+    #  Q1 CR7 Reward functions — v2: generic frame-by-frame joint tracking
+    # ------------------------------------------------------------------
+    # Active (in reward_scales):
+    #   q1_joint_position_tracking, q1_joint_velocity_tracking,
+    #   q1_lower_body_joint_position_tracking, q1_lower_body_joint_velocity_tracking
+    #
+    # Inactive / removed from reward_scales (kept for possible future use):
+    #   q1_root_z_tracking, q1_root_vz_tracking, q1_foot_max_height_tracking,
+    #   q1_root_yaw_tracking, q1_root_yaw_rate_tracking, q1_flight_no_contact,
+    #   q1_stance_contact, q1_takeoff_height_progress, q1_landing_stability
     # ------------------------------------------------------------------
 
+    # ---- Active: generic joint tracking ----
+
+    def _reward_q1_joint_position_tracking(self):
+        """All 22 joints — uniform position tracking.  exp(-mse / sigma)."""
+        err = self.dif_joint_angles  # ref - actual, [N, 22]
+        mse = torch.mean(err ** 2, dim=-1)  # [N]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_joint_pos
+        return torch.exp(-mse / sigma)
+
+    def _reward_q1_joint_velocity_tracking(self):
+        """All 22 joints — uniform velocity tracking.  exp(-mse / sigma)."""
+        err = self.dif_joint_velocities  # ref - actual, [N, 22]
+        mse = torch.mean(err ** 2, dim=-1)  # [N]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_joint_vel
+        return torch.exp(-mse / sigma)
+
+    def _reward_q1_lower_body_joint_position_tracking(self):
+        """Lower-body + waist joints — weighted position tracking.  exp(-weighted_mse / sigma)."""
+        weights = self.q1_lower_body_joint_weights  # [22]
+        err = self.dif_joint_angles  # [N, 22]
+        weighted_sq = weights * err ** 2
+        weighted_mse = weighted_sq.sum(dim=-1) / (weights.sum() + 1e-8)  # [N]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_lower_body_joint_pos
+        return torch.exp(-weighted_mse / sigma)
+
+    def _reward_q1_lower_body_joint_velocity_tracking(self):
+        """Lower-body + waist joints — weighted velocity tracking.  exp(-weighted_mse / sigma)."""
+        weights = self.q1_lower_body_joint_weights  # [22]
+        err = self.dif_joint_velocities  # [N, 22]
+        weighted_sq = weights * err ** 2
+        weighted_mse = weighted_sq.sum(dim=-1) / (weights.sum() + 1e-8)  # [N]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_lower_body_joint_vel
+        return torch.exp(-weighted_mse / sigma)
+
+    # ---- Inactive (not in reward_scales) — kept for future use ----
+
     def _reward_q1_root_z_tracking(self):
-        """Track reference root_z."""
+        """[INACTIVE] Track reference root_z."""
         error = self.q1_root_z_error
         sigma = 0.02
         return torch.exp(-error ** 2 / sigma)
 
     def _reward_q1_root_vz_tracking(self):
-        """Track reference root_vz. Weighted more heavily in aerial phases."""
+        """[INACTIVE] Track reference root_vz."""
         masks = self.q1_phase_masks
         error = self.q1_root_vz_error
         sigma = 0.15
-
-        # Higher weight in aerial phases
         is_aerial = masks['takeoff'] | masks['flight'] | masks['landing']
         weight = torch.where(is_aerial, torch.tensor(1.5, device=self.device),
                              torch.tensor(0.5, device=self.device))
+        return weight * torch.exp(-error ** 2 / sigma)
 
+    def _reward_q1_foot_max_height_tracking(self):
+        """[INACTIVE] Track reference max foot z."""
+        masks = self.q1_phase_masks
+        error = self.q1_foot_max_height_error
+        sigma = 0.03
+        is_aerial = masks['takeoff'] | masks['flight'] | masks['landing']
+        weight = torch.where(is_aerial, torch.tensor(2.0, device=self.device),
+                             torch.tensor(0.5, device=self.device))
         return weight * torch.exp(-error ** 2 / sigma)
 
     def _reward_q1_root_yaw_tracking(self):
-        """Track reference yaw using sin/cos error."""
+        """[INACTIVE] Track reference yaw."""
         yaw_err_rad = self.q1_yaw_error_rad.abs()
         sigma = 0.8
         return torch.exp(-yaw_err_rad ** 2 / sigma)
 
     def _reward_q1_root_yaw_rate_tracking(self):
-        """Track reference yaw rate. Weighted more heavily in flight/takeoff."""
+        """[INACTIVE] Track reference yaw rate."""
         masks = self.q1_phase_masks
         error = self.q1_yaw_rate_error
         sigma = 1.5
-
-        # Higher weight in flight/takeoff
         is_aerial = masks['takeoff'] | masks['flight']
         weight = torch.where(is_aerial, torch.tensor(2.0, device=self.device),
                              torch.tensor(0.3, device=self.device))
-
         return weight * torch.exp(-error ** 2 / sigma)
 
-    def _reward_q1_flight_contact(self):
-        """Penalize foot contact during reference flight phase. Positive reward for no contact."""
+    def _reward_q1_flight_no_contact(self):
+        """[INACTIVE] Penalize foot contact during flight phase."""
         flight_mask = self.q1_phase_masks['flight'].float()
         no_contact = (~self.q1_any_contact).float()
         return flight_mask * no_contact
 
     def _reward_q1_stance_contact(self):
-        """Reward having at least one foot in contact during non-flight phases."""
+        """[INACTIVE] Reward foot contact in non-flight phases."""
         not_flight = (~self.q1_phase_masks['flight']).float()
         any_contact = self.q1_any_contact.float()
         return not_flight * any_contact
 
-    def _reward_q1_lower_body_joint_tracking(self):
-        """Weighted joint position tracking for lower body joints."""
-        ref_pos = self.q1_ref_dof_pos
-        actual_pos = self.simulator.dof_pos
-        weights = self.q1_lower_body_joint_weights
-
-        weighted_sq_error = weights * (ref_pos - actual_pos) ** 2
-        weighted_mse = weighted_sq_error.mean(dim=-1)
-        sigma = 0.10
-        return torch.exp(-weighted_mse / sigma)
-
     def _reward_q1_takeoff_height_progress(self):
-        """Encourage progress toward takeoff height during crouch/takeoff phases."""
+        """[INACTIVE] Encourage progress toward takeoff height."""
         masks = self.q1_phase_masks
         takeoff_crouch = masks['crouch'] | masks['takeoff']
-        # Reward actual root_z being close to ref_root_z during crouch/takeoff
         error = self.q1_root_z_error
         sigma = 0.05
         tracking = torch.exp(-error ** 2 / sigma)
         return takeoff_crouch.float() * tracking
 
     def _reward_q1_landing_stability(self):
-        """Reward stability during landing: low roll/pitch, foot contact, near-zero vz."""
+        """[INACTIVE] Reward stability during landing."""
         masks = self.q1_phase_masks
         landing = masks['landing']
-
-        # Roll/pitch from projected gravity
         grav_xy_norm = torch.norm(self.projected_gravity[:, :2], dim=-1)
         roll_pitch_ok = torch.exp(-grav_xy_norm ** 2 / 0.01)
-
-        # Contact ok
         contact_ok = self.q1_any_contact.float()
-
-        # vz near zero
         vz_ok = torch.exp(-self.q1_actual_root_vz ** 2 / 0.1)
-
         stability = roll_pitch_ok * contact_ok * vz_ok
         return landing.float() * stability

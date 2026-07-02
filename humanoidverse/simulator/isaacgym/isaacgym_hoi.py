@@ -1,5 +1,7 @@
 import sys
 import os
+# cv2 must import BEFORE isaacgym — otherwise OpenCV's C extensions segfault
+import cv2
 from loguru import logger
 from isaacgym import gymtorch, gymapi, gymutil
 import torch
@@ -7,7 +9,7 @@ from humanoidverse.utils.torch_utils import to_torch, torch_rand_float
 import numpy as np
 from termcolor import colored
 from collections import deque
-import cv2
+# cv2 lazily imported — avoids segfault from broken OpenCV libs on headless nodes
 from datetime import datetime
 from humanoidverse.envs.env_utils.terrain import Terrain
 from rich.progress import Progress
@@ -782,13 +784,16 @@ class IsaacGym(BaseSimulator):
                     )
                     height, width, layers = sample_frame.shape
 
-                    fourcc = cv2.VideoWriter_fourcc(*"MP4V")
-                    video = cv2.VideoWriter(
-                        str(self.curr_user_recording_name) + ".mp4",
-                        fourcc,
-                        50,
-                        (width, height),
-                    )
+                    for codec in ("avc1", "h264", "mp4v"):
+                        fourcc = cv2.VideoWriter_fourcc(*codec)
+                        video = cv2.VideoWriter(
+                            str(self.curr_user_recording_name) + ".mp4",
+                            fourcc,
+                            50,
+                            (width, height),
+                        )
+                        if video.isOpened():
+                            break
 
                     for image in images:
                         video.write(

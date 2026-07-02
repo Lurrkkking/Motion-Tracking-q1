@@ -2,6 +2,9 @@ import os
 import sys
 from pathlib import Path
 
+# cv2 must import BEFORE isaacgym — otherwise OpenCV C extensions segfault
+import cv2
+
 import hydra
 from hydra.utils import instantiate
 from hydra.core.hydra_config import HydraConfig

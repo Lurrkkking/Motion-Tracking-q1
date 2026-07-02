@@ -1,0 +1,101 @@
+# Q1 CR7 Motion Tracking MuJoCo sim2sim config
+# Mirrors fdd_asap_sim2sim.py's g1_config/mujoco_config.yaml approach
+
+xml_path: "humanoidverse/data/robots/q1/q1_22dof_box.xml"
+
+# Motion / phase
+cycle_time: 2.5              # CR7 motion: 75 frames / 30 fps
+time_offset: 0.0
+phase_wrap: false
+stop_at_motion_end: true
+
+# Simulation
+simulation_dt: 0.002          # 500 Hz physics
+simulation_duration: 4.0
+control_decimation: 10        # policy @ 50 Hz (0.002 * 10 = 0.02s)
+frame_stack: 4
+
+# Observation (simple format: action + base_ang_vel + dof_pos + dof_vel + gvec + phase)
+num_single_obs: 73         # 22 + 3 + 22 + 22 + 3 + 1
+num_actions: 22
+clip_observations: 100
+clip_actions: 100
+action_scale: 0.25
+
+# Obs scales
+obs_scale_base_ang_vel: 0.25
+obs_scale_dof_pos: 1.0
+obs_scale_dof_vel: 0.05
+obs_scale_gvec: 1.0
+obs_scale_refmotion: 1.0
+obs_scale_hist: 1.0
+
+# Q1 default pose (from training config init_state.default_joint_angles)
+default_dof_pos: [
+  -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # left leg
+  -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # right leg
+  0.0, 0.0,                                # waist
+  0.0, 0.0, 0.0, 0.3,                     # left arm
+  0.0, 0.0, 0.0, 0.3                      # right arm
+]
+
+# Q1 PD gains (from training config control.stiffness/damping)
+kps: [
+  30, 30, 30, 30, 20, 20,    # left leg
+  30, 30, 30, 30, 20, 20,    # right leg
+  80, 80,                     # waist
+  30, 30, 30, 30,             # left arm
+  30, 30, 30, 30              # right arm
+]
+kds: [
+  1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
+  1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
+  2.0, 2.0,
+  1.5, 1.5, 1.5, 1.5,
+  1.5, 1.5, 1.5, 1.5
+]
+kp_scale: 1.0
+kd_scale: 1.0
+
+# Q1 torque limits (from training config dof_effort_limit_list)
+tau_limit: [
+  36, 36, 36, 36, 22, 22,
+  36, 36, 36, 36, 22, 22,
+  36, 36,
+  22, 22, 22, 22,
+  22, 22, 22, 22
+]
+
+# Init state
+init_root_pos: [0.0, 0.0, 0.42]
+init_root_rot_wxyz: [1.0, 0.0, 0.0, 0.0]   # identity, upright
+
+# Body names
+imu_body_name: pelvis
+left_foot_name: left_ankle_roll_link
+right_foot_name: right_ankle_roll_link
+
+# Safety
+min_root_z: 0.08
+max_root_z: 3.0
+max_abs_qacc: 50000.0
+solver_iterations: 100
+solver_ls_iterations: 50
+
+# Video
+video_fps: 50
+video_width: 1280
+video_height: 720
+
+# Joint names (must match ONNX action order = training dof_names)
+joint_names: [
+  "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+  "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+  "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+  "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+  "waist_roll_joint", "waist_yaw_joint",
+  "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+  "left_shoulder_yaw_joint", "left_elbow_joint",
+  "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+  "right_shoulder_yaw_joint", "right_elbow_joint"
+]

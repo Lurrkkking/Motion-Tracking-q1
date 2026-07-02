@@ -1,5 +1,7 @@
 import sys
 import os
+# cv2 must import BEFORE isaacgym — otherwise OpenCV's C extensions segfault
+import cv2
 from loguru import logger
 from isaacgym import gymtorch, gymapi, gymutil
 import torch
@@ -7,7 +9,7 @@ from humanoidverse.utils.torch_utils import to_torch, torch_rand_float
 import numpy as np
 from termcolor import colored
 from collections import deque
-import cv2
+# cv2 lazily imported — avoids segfault from broken OpenCV libs on headless nodes
 from datetime import datetime
 from humanoidverse.envs.env_utils.terrain import Terrain
 from rich.progress import Progress
@@ -546,13 +548,42 @@ class IsaacGym(BaseSimulator):
         cam_target = gymapi.Vec3(0.0, 0.0, 0.8)
         self.gym.set_camera_location(self.offscreen_camera_handle, self.envs[0], cam_pos, cam_target)
 
-        fourcc = cv2.VideoWriter_fourcc(*"MP4V")
-        self.offscreen_video_writer = cv2.VideoWriter(
-            self.offscreen_video_path, fourcc, self.offscreen_record_fps,
-            (self.offscreen_record_width, self.offscreen_record_height))
-        if not self.offscreen_video_writer.isOpened():
-            logger.error(f"Failed to open offscreen video writer: {self.offscreen_video_path}")
+        # Use ffmpeg subprocess for H.264 encoding (VSCode-compatible).
+        # Falls back to opencv if ffmpeg is not available.
+        import subprocess
+        self.offscreen_video_backend = 'opencv'
+        self.offscreen_video_writer = None
+        ffmpeg_cmd = [
+            'ffmpeg', '-y',
+            '-f', 'rawvideo', '-vcodec', 'rawvideo',
+            '-s', f'{self.offscreen_record_width}x{self.offscreen_record_height}',
+            '-pix_fmt', 'bgr24', '-r', str(self.offscreen_record_fps),
+            '-i', '-',
+            '-c:v', 'libx264', '-preset', 'fast', '-crf', '23',
+            '-pix_fmt', 'yuv420p',
+            self.offscreen_video_path,
+        ]
+        try:
+            self.offscreen_video_writer = subprocess.Popen(
+                ffmpeg_cmd, stdin=subprocess.PIPE,
+                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.offscreen_video_backend = 'ffmpeg'
+            logger.info(f"Using ffmpeg/libx264 H.264 writer")
+        except Exception:
+            pass
+        if self.offscreen_video_backend != 'ffmpeg':
             self.offscreen_video_writer = None
+            for codec in ("avc1", "h264", "mp4v"):
+                fourcc = cv2.VideoWriter_fourcc(*codec)
+                w = cv2.VideoWriter(
+                    self.offscreen_video_path, fourcc, self.offscreen_record_fps,
+                    (self.offscreen_record_width, self.offscreen_record_height))
+                if w.isOpened():
+                    self.offscreen_video_writer = w
+                    self.offscreen_video_backend = 'opencv'
+                    break
+        if self.offscreen_video_writer is None:
+            logger.error(f"Failed to open offscreen video writer: {self.offscreen_video_path}")
             return
         self.offscreen_recorded_frames = 0
         self.offscreen_recording_active = self.auto_record
@@ -592,10 +623,14 @@ class IsaacGym(BaseSimulator):
         if img.dtype != np.uint8:
             img = img.astype(np.uint8)
         bgr = cv2.cvtColor(img, cv2.COLOR_RGBA2BGR)
-        # --- ref motion marker overlay ---
         if self.show_ref_motion_markers and self.ref_marker_world_pos is not None:
             bgr = self._overlay_ref_motion_markers(bgr)
-        self.offscreen_video_writer.write(bgr)
+        if self.offscreen_video_backend == 'ffmpeg':
+            self.offscreen_video_writer.stdin.write(bgr.tobytes())
+        elif self.offscreen_video_backend == 'imageio':
+            self.offscreen_video_writer.append_data(cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB))
+        else:
+            self.offscreen_video_writer.write(bgr)
         self.offscreen_recorded_frames += 1
         if self.auto_record_num_frames > 0 and self.offscreen_recorded_frames >= self.auto_record_num_frames:
             self.offscreen_recording_active = False
@@ -686,7 +721,16 @@ class IsaacGym(BaseSimulator):
 
     def finalize_recording(self):
         if self.offscreen_video_writer is not None:
-            self.offscreen_video_writer.release()
+            try:
+                if self.offscreen_video_backend == 'ffmpeg':
+                    self.offscreen_video_writer.stdin.close()
+                    self.offscreen_video_writer.wait()
+                elif hasattr(self.offscreen_video_writer, 'close'):
+                    self.offscreen_video_writer.close()
+                else:
+                    self.offscreen_video_writer.release()
+            except Exception:
+                pass
             self.offscreen_video_writer = None
             logger.info(f"============ Offscreen video finished: {self.offscreen_video_path} ({self.offscreen_recorded_frames} frames) ============")
 

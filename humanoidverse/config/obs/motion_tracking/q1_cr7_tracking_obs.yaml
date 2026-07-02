@@ -5,6 +5,7 @@
 
 obs:
   obs_dict:
+    # actor_obs: sim2real deployable only — IMU, joint encoders, previous action, reference phase, history
     actor_obs: [
       base_ang_vel,
       projected_gravity,
@@ -12,13 +13,10 @@ obs:
       dof_vel,
       actions,
       ref_motion_phase,
-      q1_root_error,
-      q1_yaw_error,
-      q1_flight_phase,
-      q1_ref_dof_error,
       history_actor,
     ]
 
+    # critic_obs: privileged info allowed — for value function only, not deployed
     critic_obs: [
       base_lin_vel,
       base_ang_vel,

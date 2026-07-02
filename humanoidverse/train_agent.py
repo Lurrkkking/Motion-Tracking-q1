@@ -2,6 +2,8 @@ import os
 import sys
 from pathlib import Path
 
+import cv2  # must import BEFORE isaacgym to avoid OpenCV segfault
+
 import hydra
 from hydra.core.hydra_config import HydraConfig
 from hydra.core.config_store import ConfigStore

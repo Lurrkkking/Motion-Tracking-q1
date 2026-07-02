@@ -1,43 +1,51 @@
 # @package _global_
 
-# Q1 CR7 Tracking reward config — v1: crouch → jump → land
-# Phase 2 (future): add 180° yaw
+# Q1 CR7 Tracking reward config — v2: generic frame-by-frame joint tracking
+# Phase 1: stable joint tracking, no jump-specific bonuses
 
 rewards:
-  set_reward: Q1_CR7_Tracking_v1
-  set_reward_date: 20260607
+  set_reward: Q1_CR7_Tracking_v2
+  set_reward_date: 20260608
   only_positive_rewards: False
   reward_scales:
-    # Q1 CR7-specific rewards
-    q1_lower_body_joint_tracking: 4.0
-    q1_root_z_tracking: 6.0
-    q1_root_vz_tracking: 4.0
-    q1_root_yaw_tracking: 2.0
-    q1_root_yaw_rate_tracking: 3.0
-    q1_flight_contact: 3.0
-    q1_stance_contact: 1.0
-    q1_takeoff_height_progress: 2.0
-    q1_landing_stability: 2.0
+    # Core: generic frame-by-frame joint tracking (active)
+    q1_joint_position_tracking: 2.0
+    q1_joint_velocity_tracking: 0.5
+    q1_lower_body_joint_position_tracking: 3.0
+    q1_lower_body_joint_velocity_tracking: 2.0
 
-    # Standard teleop body tracking (inherited from parent)
-    teleop_body_position_extend: 2.0
+    # Light auxiliary body tracking (inherited from parent)
+    teleop_body_position_extend: 1.0
     teleop_body_position_feet: 2.0
-    teleop_body_rotation_extend: 0.5
-    teleop_joint_position: 1.0
+    teleop_body_rotation_extend: 0.3
 
     # Penalties
-    penalty_action_rate: -0.03
+    penalty_action_rate: -0.3
     penalty_torques: -0.000001
     limits_torque: -0.1
-    penalty_feet_ori: -0.05
-    penalty_slippage: -0.05
-    feet_heading_alignment: 0.0
     termination: -50.0
 
-  teleop_body_pos_lowerbody_weight: 1.5
-  teleop_body_pos_upperbody_weight: 0.8
+    # Disabled (set 0 to exclude from reward_functions)
+    penalty_feet_ori: 0.0
+    penalty_slippage: 0.0
+    feet_heading_alignment: 0.0
+    teleop_joint_position: 0.0
+
+    # Inactive jump-specific rewards — removed from active set to avoid speculation
+    # q1_root_z_tracking, q1_root_vz_tracking, q1_foot_max_height_tracking,
+    # q1_root_yaw_tracking, q1_root_yaw_rate_tracking, q1_flight_no_contact,
+    # q1_stance_contact, q1_takeoff_height_progress, q1_landing_stability
+
+  teleop_body_pos_lowerbody_weight: 1.2
+  teleop_body_pos_upperbody_weight: 0.6
 
   reward_tracking_sigma:
+    # Generic joint tracking sigmas
+    q1_joint_pos: 0.08
+    q1_joint_vel: 1.5
+    q1_lower_body_joint_pos: 0.05
+    q1_lower_body_joint_vel: 1.0
+    # Parent teleop sigmas (unchanged)
     teleop_upper_body_pos: 0.03
     teleop_lower_body_pos: 0.05
     teleop_feet_pos: 0.05

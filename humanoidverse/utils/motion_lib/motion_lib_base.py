@@ -1,6 +1,19 @@
 import glob
 import os.path as osp
 import numpy as np
+# compat: pkl files saved with numpy>=2.0 reference numpy._core and its
+# submodules (multiarray, numeric, numerictypes, etc.) which don't exist
+# in numpy<2.0. Map them to numpy.core.* equivalents.
+import sys
+import numpy.core
+import numpy.core.multiarray
+import numpy.core.numeric
+import numpy.core.numerictypes
+for _submod in ['numpy._core', 'numpy._core.multiarray', 'numpy._core.numeric', 'numpy._core.numerictypes']:
+    if _submod not in sys.modules:
+        sys.modules[_submod] = getattr(sys.modules['numpy.core'], _submod.split('.')[-1], numpy.core)
+sys.modules.setdefault('numpy._core', numpy.core)
+np._core = numpy.core
 import joblib
 import torch
 import random
