@@ -9,25 +9,28 @@ rewards:
   only_positive_rewards: False
   reward_scales:
     # Core: generic frame-by-frame joint tracking (active)
-    q1_joint_position_tracking: 2.0
-    q1_joint_velocity_tracking: 0.5
-    q1_lower_body_joint_position_tracking: 3.0
-    q1_lower_body_joint_velocity_tracking: 2.0
+    q1_joint_position_tracking: 4.0
+    q1_joint_velocity_tracking: 2.5
+    q1_lower_body_joint_position_tracking: 2.0
+    q1_lower_body_joint_velocity_tracking: 1.0
+
 
     # Light auxiliary body tracking (inherited from parent)
-    teleop_body_position_extend: 1.0
+    teleop_body_position_extend: 2.0
     teleop_body_position_feet: 2.0
     teleop_body_rotation_extend: 0.3
+    teleop_body_velocity_extend: 0.5
+    teleop_body_ang_velocity_extend: 0.5
 
     # Penalties
     penalty_action_rate: -0.3
     penalty_torques: -0.000001
     limits_torque: -0.1
-    termination: -50.0
+    termination: -30.0
 
     # Disabled (set 0 to exclude from reward_functions)
     penalty_feet_ori: 0.0
-    penalty_slippage: 0.0
+    penalty_slippage: -1.0
     feet_heading_alignment: 0.0
     teleop_joint_position: 0.0
 
@@ -36,12 +39,12 @@ rewards:
     # q1_root_yaw_tracking, q1_root_yaw_rate_tracking, q1_flight_no_contact,
     # q1_stance_contact, q1_takeoff_height_progress, q1_landing_stability
 
-  teleop_body_pos_lowerbody_weight: 1.2
+  teleop_body_pos_lowerbody_weight: 1.1
   teleop_body_pos_upperbody_weight: 0.6
 
   reward_tracking_sigma:
     # Generic joint tracking sigmas
-    q1_joint_pos: 0.08
+    q1_joint_pos: 0.10
     q1_joint_vel: 1.5
     q1_lower_body_joint_pos: 0.05
     q1_lower_body_joint_vel: 1.0

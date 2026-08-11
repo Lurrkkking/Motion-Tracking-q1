@@ -15,7 +15,7 @@ env:
       dof_vel: 1.0
       humanoid_commands_scale: 1.0
     locomotion_command_ranges:
-      lin_vel_x: [-1.0, 1.0]
+      lin_vel_x: [1.0, 1.0]
       lin_vel_y: [-1.0, 1.0]
       ang_vel_yaw: [-1.0, 1.0]
       heading: [-3.14, 3.14]

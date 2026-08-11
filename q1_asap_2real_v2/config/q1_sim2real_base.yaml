@@ -1,0 +1,117 @@
+# Q1 motion tracking sim2real base config.
+# Action-specific policy/motion paths are passed on the command line.
+
+# Motion / phase. cycle_time is a fallback; the deploy script infers it from --motion-file.
+cycle_time: 0.0
+time_offset: 0.0
+phase_wrap: false
+stop_at_motion_end: true
+
+# Dual-policy deploy metadata. The supplied pkl files contain pose_aa only, not
+# retargeted Q1 qpos, so these explicit upper-body poses are the safe fallback.
+stand_upper_body_dof_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.3]
+mimic_models:
+  lateral_raise:
+    start_upper_body_dof_pos: [0.0, 0.0, 0.0, 0.0, 0.0, 0.3, 0.0, 0.0, 0.0, 0.3]
+    # Set to policy only when a 22-DoF pkl without joint_names is explicitly
+    # known to be in this file's joint_names order.
+    motion_joint_order: null
+    pre_interp_s: 1.5
+    pre_hold_s: 1.0
+    post_hold_s: 0.5
+    post_interp_s: 1.5
+  cr7_level1:
+    # CR7_level1_raw.pkl has no joint_names, but its verified dof_names
+    # exactly match this deployment policy's 22-DoF order.
+    motion_joint_order: policy
+
+# Simulation
+simulation_dt: 0.002          # 500 Hz physics
+simulation_duration: 4.0
+control_decimation: 10        # policy @ 50 Hz (0.002 * 10 = 0.02s)
+frame_stack: 4
+
+# Observation (simple format: action + base_ang_vel + dof_pos + dof_vel + gvec + phase)
+num_single_obs: 73         # 22 + 3 + 22 + 22 + 3 + 1
+num_actions: 22
+clip_observations: 100
+clip_actions: 100
+action_scale: 0.25
+
+# Obs scales
+obs_scale_base_ang_vel: 0.25
+obs_scale_dof_pos: 1.0
+obs_scale_dof_vel: 0.05
+obs_scale_gvec: 1.0
+obs_scale_refmotion: 1.0
+obs_scale_hist: 1.0
+
+# Q1 default pose (from training config init_state.default_joint_angles)
+default_dof_pos: [
+  -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # left leg
+  -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # right leg
+  0.0, 0.0,                                # waist
+  0.0, 0.14, 0.0, 1.3,                     # left arm
+  0.0, -0.14, 0.0, 1.3                      # right arm
+]
+
+# Q1 PD gains (from training config control.stiffness/damping)
+kps: [
+  30, 30, 30, 30, 20, 20,    # left leg
+  30, 30, 30, 30, 20, 20,    # right leg
+  30, 30,                     # waist
+  30, 30, 30, 30,             # left arm
+  30, 30, 30, 30              # right arm
+]
+kds: [
+  1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
+  1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
+  1.5, 1.5,
+  1.5, 1.5, 1.5, 1.5,
+  1.5, 1.5, 1.5, 1.5
+]
+kp_scale: 1.0
+kd_scale: 1.0
+
+# Q1 torque limits (from training config dof_effort_limit_list)
+tau_limit: [
+  36, 36, 36, 36, 22, 22,
+  36, 36, 36, 36, 22, 22,
+  36, 36,
+  22, 22, 22, 22,
+  22, 22, 22, 22
+]
+
+# Init state
+init_root_pos: [0.0, 0.0, 0.42]
+init_root_rot_wxyz: [1.0, 0.0, 0.0, 0.0]   # identity, upright
+
+# Body names
+imu_body_name: pelvis
+left_foot_name: left_ankle_roll_link
+right_foot_name: right_ankle_roll_link
+
+# Safety
+min_root_z: 0.08
+max_root_z: 3.0
+max_abs_qacc: 50000.0
+solver_iterations: 100
+solver_ls_iterations: 50
+
+# Video
+video_fps: 50
+video_width: 1280
+video_height: 720
+
+# Joint names (must match ONNX action order = training dof_names)
+joint_names: [
+  "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+  "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+  "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+  "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+  "waist_roll_joint", "waist_yaw_joint",
+  "left_shoulder_pitch_joint", "left_shoulder_roll_joint",
+  "left_shoulder_yaw_joint", "left_elbow_joint",
+  "right_shoulder_pitch_joint", "right_shoulder_roll_joint",
+  "right_shoulder_yaw_joint", "right_elbow_joint"
+]

@@ -1,0 +1,117 @@
+# @package _global_
+
+# Q1 shootv4 tracking.  This keeps the stable whole-body tracking objective
+# and adds a smooth, reference-phase-gated reward for the entire right leg
+# and its ankle height during the shooting swing.
+
+rewards:
+  set_reward: Q1_Shoot_Tracking_v1
+  set_reward_date: 20260713
+  only_positive_rewards: False
+  reward_scales:
+    # Whole-motion tracking and stability.
+    q1_joint_position_tracking: 4.0
+    q1_joint_velocity_tracking: 2.5
+    q1_lower_body_joint_position_tracking: 2.0
+    q1_lower_body_joint_velocity_tracking: 1.0
+    teleop_body_position_extend: 2.0
+    teleop_body_position_feet: 2.0
+    teleop_body_rotation_extend: 0.3
+    teleop_body_velocity_extend: 0.5
+    teleop_body_ang_velocity_extend: 0.5
+
+    # Only active in q1_shoot_phase.  The joint terms cover all six right-leg
+    # DoFs; the height term prevents an averaged whole-body reward from
+    # accepting a low right-foot swing.
+    q1_shoot_right_leg_position_tracking: 6.0
+    q1_shoot_right_leg_velocity_tracking: 2.0
+    q1_shoot_right_foot_height_tracking: 4.0
+
+    penalty_action_rate: -0.3
+    penalty_torques: -0.000001
+    limits_torque: -0.1
+    penalty_slippage: -1.0
+    termination: -30.0
+
+    # Disabled: this terminal-only objective conflicts with random motion
+    # starts, because many episodes begin after the right-foot peak.
+    q1_max_feet_height_event: 0.0
+    penalty_feet_ori: 0.0
+    feet_heading_alignment: 0.0
+    teleop_joint_position: 0.0
+
+  # shootv4's right-foot peak is at phase ~= 0.61 (3.94 s / 6.5 s).
+  # A 0.02 phase transition ramps the extra reward on and off smoothly.
+  q1_shoot_phase:
+    start: 0.14
+    end: 0.28
+    transition: 0.02
+
+  teleop_body_pos_lowerbody_weight: 1.1
+  teleop_body_pos_upperbody_weight: 0.6
+
+  reward_tracking_sigma:
+    q1_joint_pos: 0.10
+    q1_joint_vel: 1.5
+    q1_lower_body_joint_pos: 0.05
+    q1_lower_body_joint_vel: 1.0
+    q1_shoot_right_leg_pos: 0.025
+    q1_shoot_right_leg_vel: 1.0
+    q1_shoot_right_foot_z: 0.0025
+    teleop_upper_body_pos: 0.03
+    teleop_lower_body_pos: 0.05
+    teleop_feet_pos: 0.05
+    teleop_body_rot: 3.0
+    teleop_body_vel: 1.0
+    teleop_body_ang_vel: 1.0
+    teleop_joint_pos: 0.5
+    teleop_joint_vel: 0.5
+
+  reward_penalty_curriculum: False
+  reward_initial_penalty_scale: 0.15
+  reward_min_penalty_scale: 0.0
+  reward_max_penalty_scale: 0.4
+  reward_penalty_level_down_threshold: 40
+  reward_penalty_level_up_threshold: 42
+  reward_penalty_degree: 0.000003
+  num_compute_average_epl: 10000
+
+  reward_limit:
+    soft_dof_pos_limit: 0.9
+    soft_dof_vel_limit: 0.9
+    soft_torque_limit: 0.9
+    reward_limits_curriculum:
+      soft_dof_pos_curriculum: False
+      soft_dof_pos_initial_limit: 1.15
+      soft_dof_pos_max_limit: 1.15
+      soft_dof_pos_min_limit: 0.95
+      soft_dof_pos_curriculum_degree: 0.00000025
+      soft_dof_pos_curriculum_level_down_threshold: 40
+      soft_dof_pos_curriculum_level_up_threshold: 42
+      soft_dof_vel_curriculum: False
+      soft_dof_vel_initial_limit: 1.15
+      soft_dof_vel_max_limit: 1.25
+      soft_dof_vel_min_limit: 0.95
+      soft_dof_vel_curriculum_degree: 0.00000025
+      soft_dof_vel_curriculum_level_down_threshold: 40
+      soft_dof_vel_curriculum_level_up_threshold: 42
+      soft_torque_curriculum: False
+      soft_torque_initial_limit: 1.05
+      soft_torque_max_limit: 1.15
+      soft_torque_min_limit: 0.85
+      soft_torque_curriculum_degree: 0.000025
+      soft_torque_curriculum_level_down_threshold: 28
+      soft_torque_curriculum_level_up_threshold: 42
+
+  reward_penalty_reward_names: [
+    "penalty_torques",
+    "penalty_dof_acc",
+    "penalty_dof_vel",
+    "penalty_action_rate",
+    "limits_dof_pos",
+    "limits_dof_vel",
+    "limits_torque",
+    "feet_heading_alignment",
+    "penalty_feet_ori",
+    "penalty_slippage",
+  ]

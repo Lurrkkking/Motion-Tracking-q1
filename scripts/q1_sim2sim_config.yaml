@@ -4,7 +4,7 @@
 xml_path: "humanoidverse/data/robots/q1/q1_22dof_box.xml"
 
 # Motion / phase
-cycle_time: 2.5              # CR7 motion: 75 frames / 30 fps
+cycle_time: 2.5             # CR7 motion: 75 frames / 30 fps
 time_offset: 0.0
 phase_wrap: false
 stop_at_motion_end: true
@@ -35,22 +35,22 @@ default_dof_pos: [
   -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # left leg
   -0.2, 0.0, 0.0, 0.5, -0.2, 0.0,        # right leg
   0.0, 0.0,                                # waist
-  0.0, 0.0, 0.0, 0.3,                     # left arm
-  0.0, 0.0, 0.0, 0.3                      # right arm
+  0.0, 0.14, 0.0, 1.3,                     # left arm
+  0.0, -0.14, 0.0, 1.3                      # right arm
 ]
 
 # Q1 PD gains (from training config control.stiffness/damping)
 kps: [
   30, 30, 30, 30, 20, 20,    # left leg
   30, 30, 30, 30, 20, 20,    # right leg
-  80, 80,                     # waist
+  30, 30,                     # waist
   30, 30, 30, 30,             # left arm
   30, 30, 30, 30              # right arm
 ]
 kds: [
   1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
   1.5, 1.5, 1.5, 1.5, 1.0, 1.0,
-  2.0, 2.0,
+  1.5, 1.5,
   1.5, 1.5, 1.5, 1.5,
   1.5, 1.5, 1.5, 1.5
 ]

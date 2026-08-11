@@ -68,13 +68,15 @@ env:
     # Q1 CR7 phase configuration
     q1_cr7:
       crouch_phase_start: 0.20
-      crouch_phase_end: 0.45
-      takeoff_phase_start: 0.38
-      takeoff_phase_end: 0.55
-      flight_phase_start: 0.50
-      flight_phase_end: 0.72
-      landing_phase_start: 0.72
-      landing_phase_end: 0.90
+      # q1_CR7_level1_asap.pkl: squat bottom ~0.337, upward-velocity peak
+      # ~0.403, apex ~0.469, and ground contact resumes around 0.53.
+      crouch_phase_end: 0.35
+      takeoff_phase_start: 0.35
+      takeoff_phase_end: 0.43
+      flight_phase_start: 0.43
+      flight_phase_end: 0.50
+      landing_phase_start: 0.50
+      landing_phase_end: 0.62
       reference_relative_termination: True
       crouch_height_margin: 0.18
       flight_height_margin: 0.18

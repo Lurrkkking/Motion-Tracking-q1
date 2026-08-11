@@ -1,0 +1,137 @@
+# @package _global_
+
+# Q1 CR7 level1 jump tracking.  Based on reward_q1_motion_tracking.yaml,
+# with root-height/root-vertical-velocity tracking and a smooth extra reward
+# from the crouch through landing event.
+
+rewards:
+  set_reward: Q1_CR7_Level1_Tracking_v1
+  set_reward_date: 20260714
+  only_positive_rewards: False
+  reward_scales:
+    # Whole-body motion tracking baseline.
+    q1_joint_position_tracking: 1.5
+    q1_joint_velocity_tracking: 0.75
+    q1_lower_body_joint_position_tracking: 0.75
+    q1_lower_body_joint_velocity_tracking: 0.35
+    teleop_body_position_extend: 3.5
+    teleop_body_position_feet: 0.75
+    teleop_body_rotation_extend: 0.5
+    teleop_body_velocity_extend: 0.35
+    teleop_body_ang_velocity_extend: 0.6
+
+    # Reference root tracking.  The first term is active over the complete
+    # clip, so the policy must crouch before jumping instead of only seeking
+    # height.  The second and third terms emphasize the event window.
+    q1_cr7_root_z_tracking: 4.0
+    q1_cr7_jump_root_z_tracking: 4.0
+    q1_cr7_root_vz_tracking: 6.0
+
+    # Strong bilateral hip/knee/ankle tracking only from takeoff through
+    # landing.  It excludes waist and arms, so the window reward directly
+    # preserves the jump-producing lower-limb motion.
+    q1_cr7_jump_leg_position_tracking: 5.0
+    q1_cr7_jump_leg_velocity_tracking: 2.5
+
+    # These terms apply only while the reference is landing and a foot is in
+    # contact.  They do not constrain the feet in the crouch, takeoff or air.
+    q1_cr7_landing_feet_level: -1.0
+    q1_cr7_landing_impact: -0.25
+
+    penalty_action_rate: -0.4
+    penalty_torques: -0.000001
+    limits_torque: -0.1
+    penalty_slippage: -1.0
+    termination: -30.0
+
+    penalty_feet_ori: 0.0
+    feet_heading_alignment: 0.0
+    teleop_joint_position: 0.0
+
+  # q1_CR7_level1_asap.pkl: crouch minimum at phase 0.337, takeoff peak
+  # velocity at 0.403, apex at 0.469, and return to stance near 0.53.
+  q1_cr7_jump_phase:
+    # Start after the reference crouch minimum (phase 0.337), so the event
+    # bonus reinforces takeoff instead of rewarding a prolonged squat.
+    start: 0.35
+    end: 0.60
+    transition: 0.015
+    outside_vz_weight: 0.15
+    vz_weight: 2.0
+
+  # q1_CR7_level1_asap.pkl lands at roughly phase 0.53.  The force penalty is
+  # deliberately a soft excess-over-threshold penalty: it suppresses spikes
+  # without asking the robot to avoid contact altogether.
+  q1_cr7_landing_contact_force_threshold: 250.0
+
+  teleop_body_pos_lowerbody_weight: 1.1
+  teleop_body_pos_upperbody_weight: 0.6
+
+  reward_tracking_sigma:
+    q1_joint_pos: 0.10
+    q1_joint_vel: 1.5
+    q1_lower_body_joint_pos: 0.05
+    q1_lower_body_joint_vel: 1.0
+    q1_cr7_root_z: 0.01
+    q1_cr7_root_vz: 0.15
+    q1_cr7_jump_leg_pos: 0.04
+    q1_cr7_jump_leg_vel: 0.75
+    teleop_upper_body_pos: 0.03
+    teleop_lower_body_pos: 0.05
+    teleop_feet_pos: 0.05
+    teleop_body_rot: 3.0
+    teleop_body_vel: 1.0
+    teleop_body_ang_vel: 1.0
+    teleop_joint_pos: 0.5
+    teleop_joint_vel: 0.5
+
+  reward_penalty_curriculum: False
+  reward_initial_penalty_scale: 0.15
+  reward_min_penalty_scale: 0.0
+  reward_max_penalty_scale: 0.4
+  reward_penalty_level_down_threshold: 40
+  reward_penalty_level_up_threshold: 42
+  reward_penalty_degree: 0.000003
+  num_compute_average_epl: 10000
+
+  reward_limit:
+    soft_dof_pos_limit: 0.9
+    soft_dof_vel_limit: 0.9
+    soft_torque_limit: 0.9
+    reward_limits_curriculum:
+      soft_dof_pos_curriculum: False
+      soft_dof_pos_initial_limit: 1.15
+      soft_dof_pos_max_limit: 1.15
+      soft_dof_pos_min_limit: 0.95
+      soft_dof_pos_curriculum_degree: 0.00000025
+      soft_dof_pos_curriculum_level_down_threshold: 40
+      soft_dof_pos_curriculum_level_up_threshold: 42
+      soft_dof_vel_curriculum: False
+      soft_dof_vel_initial_limit: 1.15
+      soft_dof_vel_max_limit: 1.25
+      soft_dof_vel_min_limit: 0.95
+      soft_dof_vel_curriculum_degree: 0.00000025
+      soft_dof_vel_curriculum_level_down_threshold: 40
+      soft_dof_vel_curriculum_level_up_threshold: 42
+      soft_torque_curriculum: False
+      soft_torque_initial_limit: 1.05
+      soft_torque_max_limit: 1.15
+      soft_torque_min_limit: 0.85
+      soft_torque_curriculum_degree: 0.000025
+      soft_torque_curriculum_level_down_threshold: 28
+      soft_torque_curriculum_level_up_threshold: 42
+
+  reward_penalty_reward_names: [
+    "penalty_torques",
+    "penalty_dof_acc",
+    "penalty_dof_vel",
+    "penalty_action_rate",
+    "limits_dof_pos",
+    "limits_dof_vel",
+    "limits_torque",
+    "feet_heading_alignment",
+    "penalty_feet_ori",
+    "penalty_slippage",
+    "q1_cr7_landing_feet_level",
+    "q1_cr7_landing_impact",
+  ]

@@ -11,7 +11,10 @@ Provides:
 import torch
 import numpy as np
 from humanoidverse.envs.motion_tracking.motion_tracking import LeggedRobotMotionTracking
-from isaac_utils.rotations import quat_to_angle_axis, calc_heading_quat, calc_heading_quat_inv
+from isaac_utils.rotations import (
+    quat_to_angle_axis, calc_heading_quat, calc_heading_quat_inv,
+    quat_rotate_inverse,
+)
 from loguru import logger
 from termcolor import colored
 
@@ -163,6 +166,34 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         self.q1_hip_indices = torch.tensor(self.q1_hip_indices, dtype=torch.long, device=self.device)
         self.q1_waist_indices = torch.tensor(self.q1_waist_indices, dtype=torch.long, device=self.device)
 
+        # The shoot-specific reward tracks every actuated joint on the right
+        # leg: hip pitch/roll/yaw, knee, and ankle pitch/roll.  Resolve these
+        # by name so the reward remains correct if the simulator DOF order is
+        # changed in the future.
+        right_leg_dof_names = [
+            'right_hip_pitch_joint', 'right_hip_roll_joint',
+            'right_hip_yaw_joint', 'right_knee_joint',
+            'right_ankle_pitch_joint', 'right_ankle_roll_joint',
+        ]
+        _check_names(right_leg_dof_names, 'right_leg_dof_names', sim.dof_names)
+        self.q1_right_leg_indices = torch.tensor(
+            [sim.dof_names.index(name) for name in right_leg_dof_names],
+            dtype=torch.long, device=self.device,
+        )
+
+        # GK-dive-specific reward tracks all six LEFT-leg joints (the reaching
+        # leg for q1_gk_low_left_2_extend).  Resolved by name like the right.
+        left_leg_dof_names = [
+            'left_hip_pitch_joint', 'left_hip_roll_joint',
+            'left_hip_yaw_joint', 'left_knee_joint',
+            'left_ankle_pitch_joint', 'left_ankle_roll_joint',
+        ]
+        _check_names(left_leg_dof_names, 'left_leg_dof_names', sim.dof_names)
+        self.q1_left_leg_indices = torch.tensor(
+            [sim.dof_names.index(name) for name in left_leg_dof_names],
+            dtype=torch.long, device=self.device,
+        )
+
         # --- 8. Build lower-body joint weight vector ---
         self.q1_lower_body_joint_weights = torch.ones(num_dofs, device=self.device)
         knee_w = 2.0
@@ -189,6 +220,16 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
             elif 'shoulder' in name or 'elbow' in name:
                 self.q1_lower_body_joint_weights[i] = 0.3  # low weight for upper body
 
+        # Strictly the two legs: six hip DOFs, two knees and four ankles.
+        # Unlike q1_lower_body_joint_weights this excludes waist and arms,
+        # because the CR7 event reward must concentrate on takeoff/landing.
+        self.q1_leg_joint_indices = torch.cat([
+            self.q1_hip_indices, self.q1_knee_indices, self.q1_ankle_indices,
+        ])
+        self.q1_leg_joint_weights = self.q1_lower_body_joint_weights[
+            self.q1_leg_joint_indices
+        ]
+
         # --- Print mapping summary ---
         logger.info(colored("[Q1CR7_MAPPING]", "cyan"))
         logger.info(f"  num_dofs={num_dofs}")
@@ -205,6 +246,8 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         logger.info(f"  ankle_indices={self.q1_ankle_indices.tolist()}")
         logger.info(f"  hip_indices={self.q1_hip_indices.tolist()}")
         logger.info(f"  waist_indices={self.q1_waist_indices.tolist()}")
+        logger.info(f"  right_leg_indices={self.q1_right_leg_indices.tolist()}")
+        logger.info(f"  leg_joint_indices={self.q1_leg_joint_indices.tolist()}")
         logger.info(colored("[Q1CR7_MAPPING] Validation PASSED", "green"))
 
     # ------------------------------------------------------------------
@@ -240,6 +283,65 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
     def _get_q1_cr7_phase_masks(self):
         """Public alias — returns is_crouch, is_takeoff, is_flight, is_landing, is_after_landing."""
         return self._get_phase_masks()
+
+    def _get_q1_shoot_phase_weight(self):
+        """Smooth [0, 1] gate for the shoot-specific right-leg rewards.
+
+        The settings live in the selected reward YAML, so the generic Q1
+        tracking configuration carries no shoot-motion assumption.
+        """
+        cfg = self.config.rewards.get('q1_shoot_phase', {})
+        start = float(cfg.get('start', 0.50))
+        end = float(cfg.get('end', 0.72))
+        transition = float(cfg.get('transition', 0.02))
+        if not 0.0 <= start < end <= 1.0:
+            raise ValueError(f"Invalid q1_shoot_phase window: start={start}, end={end}")
+
+        phase = self._ref_motion_phase.squeeze(-1)
+        if transition <= 0.0:
+            return ((phase >= start) & (phase <= end)).float()
+
+        rise = ((phase - start) / transition).clamp(min=0.0, max=1.0)
+        fall = ((end - phase) / transition).clamp(min=0.0, max=1.0)
+        return rise * fall
+
+    def _get_q1_gk_dive_phase_weight(self):
+        """Smooth [0, 1] gate for the GK-dive-specific left-leg rewards.
+
+        Settings live in the selected reward YAML (q1_gk_dive_phase), so the
+        generic Q1 tracking configuration carries no dive assumption.
+        """
+        cfg = self.config.rewards.get('q1_gk_dive_phase', {})
+        start = float(cfg.get('start', 0.10))
+        end = float(cfg.get('end', 0.35))
+        transition = float(cfg.get('transition', 0.02))
+        if not 0.0 <= start < end <= 1.0:
+            raise ValueError(f"Invalid q1_gk_dive_phase window: start={start}, end={end}")
+
+        phase = self._ref_motion_phase.squeeze(-1)
+        if transition <= 0.0:
+            return ((phase >= start) & (phase <= end)).float()
+
+        rise = ((phase - start) / transition).clamp(min=0.0, max=1.0)
+        fall = ((end - phase) / transition).clamp(min=0.0, max=1.0)
+        return rise * fall
+
+    def _get_q1_cr7_jump_phase_weight(self):
+        """Smooth gate for the crouch-to-landing event of a CR7 jump motion."""
+        cfg = self.config.rewards.get('q1_cr7_jump_phase', {})
+        start = float(cfg.get('start', 0.22))
+        end = float(cfg.get('end', 0.62))
+        transition = float(cfg.get('transition', 0.02))
+        if not 0.0 <= start < end <= 1.0:
+            raise ValueError(f"Invalid q1_cr7_jump_phase window: start={start}, end={end}")
+
+        phase = self._ref_motion_phase.squeeze(-1)
+        if transition <= 0.0:
+            return ((phase >= start) & (phase <= end)).float()
+
+        rise = ((phase - start) / transition).clamp(min=0.0, max=1.0)
+        fall = ((end - phase) / transition).clamp(min=0.0, max=1.0)
+        return rise * fall
 
     # ------------------------------------------------------------------
     #  Pre-compute observations — add Q1 CR7-specific buffers
@@ -458,6 +560,154 @@ class Q1CR7MotionTracking(LeggedRobotMotionTracking):
         weighted_mse = weighted_sq.sum(dim=-1) / (weights.sum() + 1e-8)  # [N]
         sigma = self.config.rewards.reward_tracking_sigma.q1_lower_body_joint_vel
         return torch.exp(-weighted_mse / sigma)
+
+    def _reward_q1_shoot_right_leg_position_tracking(self):
+        """Track all six right-leg joints during the shooting swing only."""
+        err = self.dif_joint_angles[:, self.q1_right_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_right_leg_pos
+        return self._get_q1_shoot_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_shoot_right_leg_velocity_tracking(self):
+        """Track all six right-leg joint velocities during the shooting swing."""
+        err = self.dif_joint_velocities[:, self.q1_right_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_right_leg_vel
+        return self._get_q1_shoot_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_shoot_right_foot_height_tracking(self):
+        """Match the reference right-ankle world height during the shooting swing."""
+        right_foot_z_err = self.dif_global_body_pos[:, self.q1_feet_indices[1], 2]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_right_foot_z
+        return self._get_q1_shoot_phase_weight() * torch.exp(
+            -(right_foot_z_err ** 2) / sigma
+        )
+
+    def _reward_q1_shoot_left_leg_position_tracking(self):
+        """Track all six left-leg joints during the shooting swing only."""
+        err = self.dif_joint_angles[:, self.q1_left_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_left_leg_pos
+        return self._get_q1_shoot_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_shoot_left_leg_velocity_tracking(self):
+        """Track all six left-leg joint velocities during the shooting swing."""
+        err = self.dif_joint_velocities[:, self.q1_left_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_left_leg_vel
+        return self._get_q1_shoot_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_shoot_left_foot_height_tracking(self):
+        """Match the reference left-ankle world height during the shooting swing."""
+        left_foot_z_err = self.dif_global_body_pos[:, self.q1_feet_indices[0], 2]
+        sigma = self.config.rewards.reward_tracking_sigma.q1_shoot_left_foot_z
+        return self._get_q1_shoot_phase_weight() * torch.exp(
+            -(left_foot_z_err ** 2) / sigma
+        )
+
+    def _reward_q1_gk_dive_left_leg_position_tracking(self):
+        """Track all six left-leg joints during the goalkeeper dive window only."""
+        err = self.dif_joint_angles[:, self.q1_left_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_left_leg_pos
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_gk_dive_left_leg_velocity_tracking(self):
+        """Track all six left-leg joint velocities during the goalkeeper dive window."""
+        err = self.dif_joint_velocities[:, self.q1_left_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_left_leg_vel
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_gk_dive_left_foot_position_tracking(self):
+        """Match the reference left-ankle world position (reach) during the dive."""
+        left_foot_err = self.dif_global_body_pos[:, self.q1_feet_indices[0], :]
+        mse = torch.mean(left_foot_err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_left_foot_pos
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_gk_dive_right_leg_position_tracking(self):
+        """Track all six right-leg joints during the goalkeeper dive window only."""
+        err = self.dif_joint_angles[:, self.q1_right_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_right_leg_pos
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_gk_dive_right_leg_velocity_tracking(self):
+        """Track all six right-leg joint velocities during the goalkeeper dive window."""
+        err = self.dif_joint_velocities[:, self.q1_right_leg_indices]
+        mse = torch.mean(err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_right_leg_vel
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_gk_dive_right_foot_position_tracking(self):
+        """Match the reference right-ankle world position (reach) during the dive."""
+        right_foot_err = self.dif_global_body_pos[:, self.q1_feet_indices[1], :]
+        mse = torch.mean(right_foot_err ** 2, dim=-1)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_gk_dive_right_foot_pos
+        return self._get_q1_gk_dive_phase_weight() * torch.exp(-mse / sigma)
+
+    def _reward_q1_cr7_root_z_tracking(self):
+        """Track reference pelvis height for the whole motion, including crouch."""
+        sigma = self.config.rewards.reward_tracking_sigma.q1_cr7_root_z
+        return torch.exp(-(self.q1_root_z_error ** 2) / sigma)
+
+    def _reward_q1_cr7_jump_root_z_tracking(self):
+        """Increase root-height tracking emphasis from crouch through landing."""
+        sigma = self.config.rewards.reward_tracking_sigma.q1_cr7_root_z
+        tracking = torch.exp(-(self.q1_root_z_error ** 2) / sigma)
+        return self._get_q1_cr7_jump_phase_weight() * tracking
+
+    def _reward_q1_cr7_root_vz_tracking(self):
+        """Track signed reference vertical velocity, with extra jump-window weight."""
+        cfg = self.config.rewards.q1_cr7_jump_phase
+        outside_weight = float(cfg.get('outside_vz_weight', 0.25))
+        jump_weight = float(cfg.get('vz_weight', 1.5))
+        phase_weight = self._get_q1_cr7_jump_phase_weight()
+        weight = outside_weight + (jump_weight - outside_weight) * phase_weight
+        sigma = self.config.rewards.reward_tracking_sigma.q1_cr7_root_vz
+        return weight * torch.exp(-(self.q1_root_vz_error ** 2) / sigma)
+
+    def _reward_q1_cr7_jump_leg_position_tracking(self):
+        """Strong bilateral hip/knee/ankle position tracking in the jump window."""
+        err = self.dif_joint_angles[:, self.q1_leg_joint_indices]
+        weights = self.q1_leg_joint_weights
+        weighted_mse = (weights * err.square()).sum(dim=-1) / (weights.sum() + 1e-8)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_cr7_jump_leg_pos
+        return self._get_q1_cr7_jump_phase_weight() * torch.exp(-weighted_mse / sigma)
+
+    def _reward_q1_cr7_jump_leg_velocity_tracking(self):
+        """Strong bilateral hip/knee/ankle velocity tracking in the jump window."""
+        err = self.dif_joint_velocities[:, self.q1_leg_joint_indices]
+        weights = self.q1_leg_joint_weights
+        weighted_mse = (weights * err.square()).sum(dim=-1) / (weights.sum() + 1e-8)
+        sigma = self.config.rewards.reward_tracking_sigma.q1_cr7_jump_leg_vel
+        return self._get_q1_cr7_jump_phase_weight() * torch.exp(-weighted_mse / sigma)
+
+    def _reward_q1_cr7_landing_feet_level(self):
+        """Penalize foot roll/pitch only for feet contacting during landing."""
+        feet_quat = self.simulator._rigid_body_rot[:, self.q1_feet_indices, :]
+        gravity = self.gravity_vec[:, None, :].expand(-1, 2, -1)
+        feet_gravity = quat_rotate_inverse(
+            feet_quat.reshape(-1, 4), gravity.reshape(-1, 3), w_last=True
+        ).reshape(self.num_envs, 2, 3)
+        tilt = torch.norm(feet_gravity[:, :, :2], dim=-1)
+        landing_contact = self.q1_phase_masks['landing'].unsqueeze(-1) & self.q1_foot_contact
+        return torch.sum(tilt * landing_contact.float(), dim=-1)
+
+    def _reward_q1_cr7_landing_impact(self):
+        """Softly penalize excessive upward ground force during reference landing.
+
+        The threshold makes ordinary support force free; only the excess is
+        charged, which avoids discouraging the contact required to land.
+        """
+        threshold = float(self.config.rewards.q1_cr7_landing_contact_force_threshold)
+        if threshold <= 0.0:
+            raise ValueError('q1_cr7_landing_contact_force_threshold must be positive')
+        normal_force = self.simulator.contact_forces[:, self.q1_feet_indices, 2].clamp_min(0.0)
+        excess = (normal_force / threshold - 1.0).clamp_min(0.0)
+        landing = self.q1_phase_masks['landing'].float().unsqueeze(-1)
+        return torch.sum(landing * excess.square(), dim=-1)
 
     # ---- Inactive (not in reward_scales) — kept for future use ----
 
